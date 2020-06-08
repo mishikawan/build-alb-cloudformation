@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: request SSLCERT by ACM
+Parameters:
+  SystemName:
+    Description: system name
+    Type: String
+    Default: pjname
+  PhaseName:
+    Description: Phase
+    Type: String
+    Default: test
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  DomainName:
+    Type: String
+
+Resources:
+  ACMCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub '*.${DomainName}'
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-sslcert
+      ValidationMethod: DNS
+
+Outputs:
+  ACMARN:
+    Value: !Ref ACMCertificate
+    Export:
+      Name: !Sub ${SystemName}-${PhaseName}-cert
+
+

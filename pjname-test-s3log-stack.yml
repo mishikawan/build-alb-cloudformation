@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: create S3 Bucket ( ALB LOG )
+
+Parameters:
+  SystemName:
+    Description: system name
+    Type: String
+    Default: pjname
+  PhaseName:
+    Description: Phase
+    Type: String
+    Default: test
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  BucketKeyword:
+    Description: BucketName keyword
+    Type: String
+    Default: alblog
+
+Mappings:
+  AlbLogRegion:
+    us-east-1: 
+      Principal: 127311923021
+    us-east-2: 
+      Principal: 033677994240
+    us-west-1: 
+      Principal: 027434742980
+    us-west-2: 
+      Principal: 797873946194
+    ca-central-1:
+      Principal: 985666609251
+    eu-central-1:
+      Principal: 054676820928
+    eu-west-1:
+      Principal: 156460612806
+    eu-west-2:
+      Principal: 652711504416
+    eu-west-3:
+      Principal: 009996457667
+    ap-northeast-1:
+      Principal: 582318560864
+    ap-northeast-2:
+      Principal: 600734575887
+    ap-southeast-1:
+      Principal: 114774131450
+    ap-southeast-2:
+      Principal: 783225319266
+    ap-south-1:
+      Principal: 718504428378
+    sa-east-1:
+      Principal: 507241528517
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${BucketKeyword}-${AWS::Region}-${AWS::AccountId}
+      AccessControl: Private
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource: !Sub arn:aws:s3:::${S3Bucket}/*
+            Principal:
+             AWS:
+               - !FindInMap [ AlbLogRegion, !Ref "AWS::Region", Principal ]
+
+Outputs:
+  S3LOGBucketName:
+    Value: !Sub alblog-${AWS::Region}-${AWS::AccountId}
+    Export:
+      Name: !Sub ${SystemName}-${PhaseName}-${BucketKeyword}
+

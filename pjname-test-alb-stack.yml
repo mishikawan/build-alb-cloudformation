@@ -1,0 +1,306 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: create vpc, ec2, alb
+
+Parameters:
+  SystemName:
+    Description: system name
+    Type: String
+    Default: pjname
+  PhaseName:
+    Description: Phase
+    Type: String
+    Default: test
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  EC2InstanceType:
+    Description: t2.micro
+    Type: String
+    Default: t2.micro
+  EC2InstanceAMI:
+    Description: amazon linux
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  EC2VolumeType:
+    Type: String
+    Default: gp2
+  EC2VolumeSize:
+    Description: 8
+    Type: Number
+    Default: 8
+  VPCCIDR:
+    Description: VPC NW
+    Type: String
+    Default: 192.168.0.0/16
+  PUBLIC0001CIDR:
+    Description: Public NW#1
+    Type: String
+    Default: 192.168.1.0/24
+  PUBLIC0002CIDR:
+    Description: Public NW#2
+    Type: String
+    Default: 192.168.2.0/24
+  BucketKeyword:
+    Description: BucketName keyword
+    Type: String
+    Default: alblog
+  SSHKEYNAME:
+    Description: SSHKEY
+    Type: String
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-vpc
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-igw
+  InternetGatewayAttachment: 
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC 
+  PublicSubnet0001:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PUBLIC0001CIDR
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-public-subnet0001
+      VpcId: !Ref VPC
+  PublicSubnet0002:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PUBLIC0002CIDR
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-public-subnet0002
+      VpcId: !Ref VPC
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-public-rtb
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+  PubSubnet0001RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet0001
+      RouteTableId: !Ref PublicRouteTable
+  PubSubnet0002RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet0002
+      RouteTableId: !Ref PublicRouteTable
+  EC2SecurityGroupICMP:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: allow ICMP via same VPC
+      SecurityGroupIngress:
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-SG-icmp
+  EC2SecurityGroupSSH:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: allow SSH via static IP
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-SG-ssh
+  EC2SecurityGroupHTTP:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: allow HTTP via static IP
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-SG-http
+  EC2Instance0001:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      ImageId: !Ref EC2InstanceAMI
+      SubnetId: !Ref PublicSubnet0001
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: !Ref EC2VolumeType
+            VolumeSize: !Ref EC2VolumeSize
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-${EC2InstanceType}-01
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroupICMP
+        - !Ref EC2SecurityGroupSSH
+        - !Ref EC2SecurityGroupHTTP
+      KeyName: !Ref SSHKEYNAME
+      UserData: !Base64 |
+        #! /bin/bash
+        yum -y install httpd
+        systemctl start httpd
+        systemctl enable httpd
+        echo 0001 > /var/www/html/index.html
+  EC2Instance0002:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      ImageId: !Ref EC2InstanceAMI
+      SubnetId: !Ref PublicSubnet0002
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: !Ref EC2VolumeType
+            VolumeSize: !Ref EC2VolumeSize
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-${EC2InstanceType}-02
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroupICMP
+        - !Ref EC2SecurityGroupSSH
+        - !Ref EC2SecurityGroupHTTP
+      KeyName: !Ref SSHKEYNAME
+      UserData: !Base64 |
+        #! /bin/bash
+        yum -y install httpd
+        systemctl start httpd
+        systemctl enable httpd
+        echo 0002 > /var/www/html/index.html
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC 
+      GroupName: !Sub ${SystemName}-${PhaseName}-alb-sg
+      GroupDescription: allow http/https ports
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-alb-sg
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+  TargetGroup: 
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      VpcId: !Ref VPC 
+      Protocol: HTTP
+      Port: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: '/'
+      HealthCheckPort: traffic-port
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 10
+      Matcher: 
+        HttpCode: 200
+      Tags: 
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-tg
+      Targets: 
+        - Id: !Ref EC2Instance0001
+          Port: 80
+        - Id: !Ref EC2Instance0002
+          Port: 80
+  ALBLB: 
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-alb
+      Scheme: internet-facing
+      LoadBalancerAttributes: 
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value:
+            Fn::ImportValue:
+              !Sub  ${SystemName}-${PhaseName}-${BucketKeyword}
+        - Key: deletion_protection.enabled
+          Value: false
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets: 
+        - !Ref PublicSubnet0001
+        - !Ref PublicSubnet0002
+  ALBListener: 
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ALBLB
+      Certificates:
+         - CertificateArn:
+             Fn::ImportValue:
+               !Sub ${SystemName}-${PhaseName}-cert
+      Port: 443
+      Protocol: HTTPS
+
+Outputs:
+  PublicDNS0001:
+    Value:
+      Fn::GetAtt:
+      - EC2Instance0001
+      - PublicDnsName
+    Export:
+      Name: !Sub ${AWS::StackName}-EC2Instance0001PublicDns
+  PublicDNS0002:
+    Value:
+      Fn::GetAtt:
+      - EC2Instance0002
+      - PublicDnsName
+    Export:
+      Name: !Sub ${AWS::StackName}-EC2Instance0002PublicDns
+  ELBDNSName:
+    Value:
+      Fn::GetAtt:
+      - ALBLB
+      - DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-ELBDNSNAME
